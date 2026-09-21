@@ -17,41 +17,26 @@ from datetime import datetime, timezone
 URL_BASE_NXT = "https://console.nxt4insight.com"
 LOGIN_URL_NXT = f"{URL_BASE_NXT}/Account/Login"
 TIMELINE_URL = f"{URL_BASE_NXT}/Movimentacao/LoadTimeLine"
-GRID_ORGANOGRAMA_URL = f"{URL_BASE_NXT}/Organograma/CarregarGridOrganograma"
 CREATE_VIEW_URL = f"{URL_BASE_NXT}/Movimentacao/Create"
 CREATE_INVENTARIO_URL = f"{URL_BASE_NXT}/Movimentacao/CreateInventario"
 
 USUARIO_NXT = "rafael.reis@mgitech.com.br"
 SENHA_NXT = "R@fa140033"
 
+# ID fixo do organograma de destino no NXT
+ID_ORGANOGRAMA_DESTINO = 31096251
+
 # --- Cloud4Mobile (C4M) ---
 BASE_URL_C4M = "https://api.cloud4mobile.com.br"
 CONSUMER_KEY = os.getenv("CONSUMER_KEY")
 CONSUMER_SECRET = os.getenv("CONSUMER_SECRET")
 
-NOME_GRUPO_ALVO_C4M = "XCOVER7_NXT_Assinar_Termo"
+NOME_GRUPO_ALVO_C4M = "Startup"
 PACKAGE_ALVO_C4M = "com.safira.app"
 
 # --- Lista Única de IMEIs ---
 LISTA_IMEIS = [
-    "350614763243817",
-    "350614763248675",
-    "350614763248881",
-    "350614763249970",
-    "350614763251000",
-    "350614763265273",
-    "350614763266248",
-    "350614763266719",
-    "350614763266743",
-    "350614763268459",
-    "350614763270281",
-    "350614763271131",
-    "350614763271446",
-    "350614763272667",
-    "350614763272709",
-    "350614763272923",
-    "350614763273038",
-    "350614763274143"
+    "351989270713463",
 ]
 
 # ==============================================================================
@@ -126,69 +111,6 @@ def buscar_ultima_locacao_timeline(session: requests.Session, dispositivo_id: st
         print(f"❌ [NXT] Erro ao buscar timeline ({dispositivo_id}): {e}")
 
     return {}
-
-
-def buscar_id_organograma_estoque(session: requests.Session, nome_empresa: str, organograma_colab: str) -> int:
-    params = {
-        "skip": 0,
-        "take": 500,
-        "requireTotalCount": "true",
-        "sort": json.dumps([{"selector": "Filial", "desc": False}]),
-        "filter": json.dumps(["Filial", "contains", nome_empresa]),
-        "totalSummary": json.dumps([]),
-    }
-
-    headers = {
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": f"{URL_BASE_NXT}/Organograma",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    }
-
-    codigo_cred = ""
-    if "CRED" in organograma_colab.upper():
-        partes = organograma_colab.upper().split("CRED")
-        if len(partes) > 1:
-            digitos = "".join([char for char in partes[1] if char.isdigit()])
-            if digitos:
-                codigo_cred = f"CRED{digitos}"
-
-    if not codigo_cred:
-        codigo_cred = organograma_colab.upper().strip()
-
-    try:
-        res = session.get(GRID_ORGANOGRAMA_URL, params=params, headers=headers, timeout=20)
-        if res.status_code == 200:
-            dados = res.json()
-            lista_organogramas = dados.get("data") or []
-            candidatos = []
-
-            for item in lista_organogramas:
-                str_item = json.dumps(item, ensure_ascii=False).upper()
-                if codigo_cred in str_item and "ESTOQUE" in str_item:
-                    candidatos.append(item)
-
-            if candidatos:
-                item_selecionado = candidatos[0]
-                for cand in candidatos:
-                    str_cand = json.dumps(cand, ensure_ascii=False).upper()
-                    if f"ESTOQUE - {codigo_cred}" in str_cand or f"ESTOQUE-{codigo_cred}" in str_cand:
-                        item_selecionado = cand
-                        break
-
-                id_organograma = (
-                    item_selecionado.get("IdOrganograma")
-                    or item_selecionado.get("IdOrganogramaFilho")
-                    or item_selecionado.get("IdEse")
-                    or item_selecionado.get("CodigoOrganograma")
-                    or item_selecionado.get("IdEstrutura")
-                    or item_selecionado.get("Id")
-                )
-                return int(id_organograma)
-    except Exception as e:
-        print(f"❌ [NXT] Erro ao consultar grid de organogramas: {e}")
-
-    return 0
 
 
 def obter_token_verificacao_form(session: requests.Session) -> str:
@@ -420,7 +342,6 @@ def executar_fluxo_unificado():
     resumo = {
         "nxt_sucesso": [],
         "nxt_ignorado_estoque": [],
-        "nxt_erro_organograma": [],
         "nxt_sem_timeline": [],
         "nxt_falha_api": [],
         "c4m_sucesso": [],
@@ -432,7 +353,7 @@ def executar_fluxo_unificado():
     # 4. Iteração nos IMEIs
     total = len(LISTA_IMEIS)
     for idx, imei in enumerate(LISTA_IMEIS, start=1):
-        print(f"--------------------------------------------------------------------------------")
+        print("-" * 80)
         print(f"📱 [{idx}/{total}] Processando IMEI: {imei}")
 
         # ----------------------------------------------------------------------
@@ -447,33 +368,25 @@ def executar_fluxo_unificado():
         else:
             nome_vinculado = str(ultima_locacao.get("nomevinculado") or "").strip().upper()
             organograma_colab = str(ultima_locacao.get("organogramacolaboador") or "").strip().upper()
-            nome_empresa = ultima_locacao.get("empresa", "EMPRESA REDECARD")
             id_empresa = ultima_locacao.get("idempresa", 6576)
 
             if nome_vinculado.startswith("ESTOQUE") or organograma_colab.startswith("ESTOQUE"):
                 print("  ⛔ [NXT] Dispositivo já em estoque. Movimentação NXT ignorada.")
                 resumo["nxt_ignorado_estoque"].append(imei)
             else:
-                id_organograma = buscar_id_organograma_estoque(
-                    nxt_session, nome_empresa=nome_empresa, organograma_colab=organograma_colab
+                res_nxt = movimentar_dispositivo_inventario(
+                    nxt_session,
+                    lista_ativos=imei,
+                    id_organograma=ID_ORGANOGRAMA_DESTINO,
+                    id_empresa=id_empresa,
                 )
-                if not id_organograma:
-                    print("  ❌ [NXT] ID do Organograma não localizado.")
-                    resumo["nxt_erro_organograma"].append(imei)
+                ok_status = str(res_nxt.get("Ok", "")).lower()
+                if ok_status == "true" or res_nxt.get("status") == "sucesso":
+                    print(f"  ✅ [NXT] Movimentado para o organograma {ID_ORGANOGRAMA_DESTINO}!")
+                    resumo["nxt_sucesso"].append(imei)
                 else:
-                    res_nxt = movimentar_dispositivo_inventario(
-                        nxt_session,
-                        lista_ativos=imei,
-                        id_organograma=id_organograma,
-                        id_empresa=id_empresa,
-                    )
-                    ok_status = str(res_nxt.get("Ok", "")).lower()
-                    if ok_status == "true" or res_nxt.get("status") == "sucesso":
-                        print(f"  ✅ [NXT] Movimentado para o organograma {id_organograma}!")
-                        resumo["nxt_sucesso"].append(imei)
-                    else:
-                        print(f"  ❌ [NXT] Falha na movimentação: {res_nxt.get('Msg', 'Erro desconhecido')}")
-                        resumo["nxt_falha_api"].append(imei)
+                    print(f"  ❌ [NXT] Falha na movimentação: {res_nxt.get('Msg', 'Erro desconhecido')}")
+                    resumo["nxt_falha_api"].append(imei)
 
         # ----------------------------------------------------------------------
         # PASSO B: GERENCIAMENTO E LIMPEZA NO CLOUD4MOBILE
@@ -500,7 +413,7 @@ def executar_fluxo_unificado():
                 if ok_grupo:
                     resumo["c4m_sucesso"].append(imei)
             else:
-                print(f"  ❌ [C4M] Falha ao enviar ordem de limpeza.")
+                print("  ❌ [C4M] Falha ao enviar ordem de limpeza.")
                 resumo["c4m_falha_limpeza"].append(imei)
 
         time.sleep(0.5)
@@ -515,7 +428,6 @@ def executar_fluxo_unificado():
     print(f"  ✅ Movimentados com sucesso ({len(resumo['nxt_sucesso'])}): {resumo['nxt_sucesso']}")
     print(f"  ⛔ Já estavam em estoque ({len(resumo['nxt_ignorado_estoque'])}): {resumo['nxt_ignorado_estoque']}")
     print(f"  ⚠️ Sem timeline ({len(resumo['nxt_sem_timeline'])}): {resumo['nxt_sem_timeline']}")
-    print(f"  ❌ Erro no organograma ({len(resumo['nxt_erro_organograma'])}): {resumo['nxt_erro_organograma']}")
     print(f"  ❌ Rejeitados pela API NXT ({len(resumo['nxt_falha_api'])}): {resumo['nxt_falha_api']}")
     print("\n--- CLOUD4MOBILE (C4M) ---")
     print(f"  ✅ Grupo alterado e limpeza enviada ({len(resumo['c4m_sucesso'])}): {resumo['c4m_sucesso']}")
