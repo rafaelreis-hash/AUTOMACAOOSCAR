@@ -1,0 +1,28 @@
+name: Executar Limpeza C4M
+
+on:
+  schedule:
+    # 07:45 (Brasília) = 10:45 UTC no dia 20 de Setembro
+    - cron: '30 15 20 9 *'
+  workflow_dispatch:
+
+jobs:
+  executar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar codigo do repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar o Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar dependencias
+        run: pip install requests beautifulsoup4
+
+      - name: Executar script Python
+        env:
+          CONSUMER_KEY: ${{ secrets.CONSUMER_KEY }}
+          CONSUMER_SECRET: ${{ secrets.CONSUMER_SECRET }}
+        run: python main.py
